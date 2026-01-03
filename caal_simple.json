@@ -1,0 +1,413 @@
+{
+  "name": "CAAL - Workflow Creator (Simple)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "create-workflow-caal",
+        "responseMode": "responseNode"
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0],
+      "id": "webhook-1",
+      "name": "Webhook",
+      "notes": "POST /webhook/create-workflow-caal\n{\n  \"description\": \"Get weather from wttr.in\",\n  \"requirements\": \"Use curl to wttr.in API\"\n}"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"creating\", \"description\": \"{{ $json.body.description }}\" }"
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [200, 0],
+      "id": "respond-1",
+      "name": "Respond"
+    },
+    {
+      "parameters": {
+        "command": "=claude -p \"Create n8n workflow:\\nDescription: {{ $json.body.description }}\\nRequirements: {{ $json.body.requirements || 'None' }}\\n\\nReturn JSON in ```json fence and announcement in ```announcement fence. Set availableInMCP to true.\" --session-id {{ $json.session_id }} --model sonnet --print --output-format json --dangerously-skip-permissions",
+        "cwd": "E:\\Contexto CLAUDE"
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [600, 0],
+      "id": "ssh-create",
+      "name": "Claude Create",
+      "credentials": {
+        "sshPassword": {
+          "id": "V4sZYDRz7ppSgxbk",
+          "name": "JARVIS"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Generate session ID\nfunction generateUUID() {\n  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {\n    const r = Math.random() * 16 | 0;\n    const v = c === 'x' ? r : (r & 0x3 | 0x8);\n    return v.toString(16);\n  });\n}\n\nconst sessionId = generateUUID();\n\nreturn {\n  json: {\n    ...($json),\n    session_id: sessionId\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [400, 0],
+      "id": "gen-session",
+      "name": "Generate Session"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const stdout = $json.stdout || '';\nlet result = stdout;\n\ntry {\n  const parsed = JSON.parse(stdout);\n  result = parsed.result || stdout;\n} catch (e) {}\n\n// Extract workflow JSON\nconst jsonMatch = result.match(/```json\\s*\\n([\\s\\S]*?)\\n```/);\nif (!jsonMatch) {\n  throw new Error('No JSON found in Claude response');\n}\n\nconst workflow = JSON.parse(jsonMatch[1]);\nconst sessionId = $('Generate Session').item.json.session_id;\n\nreturn {\n  json: {\n    workflow: workflow,\n    session_id: sessionId\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [800, 0],
+      "id": "parse-wf",
+      "name": "Parse Workflow"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/api/v1/workflows",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "name",
+              "value": "={{ $json.workflow.name }}"
+            },
+            {
+              "name": "nodes",
+              "value": "={{ $json.workflow.nodes }}"
+            },
+            {
+              "name": "connections",
+              "value": "={{ $json.workflow.connections }}"
+            },
+            {
+              "name": "settings",
+              "value": "={{ $json.workflow.settings }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [1000, 0],
+      "id": "create-wf",
+      "name": "Create Workflow",
+      "notes": "⚠️ Configure credencial 'n8n API' aqui!"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:5678/api/v1/workflows/{{ $json.id }}/activate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "versionId",
+              "value": "={{ $json.versionId }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [1200, 0],
+      "id": "activate-wf",
+      "name": "Activate Workflow",
+      "notes": "⚠️ Configure credencial 'n8n API' aqui!"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "retry-1",
+              "name": "retryCount",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "wf-id",
+              "name": "workflow_id",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "sess-id",
+              "name": "session_id",
+              "value": "={{ $('Parse Workflow').item.json.session_id }}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1400, 0],
+      "id": "set-counter",
+      "name": "Set Counter"
+    },
+    {
+      "parameters": {
+        "command": "=claude -p \"Test workflow {{ $json.workflow_id }}. If OK, respond ONLY 'OK'. If broken, fix and return updated JSON in ```json fence.\" -r {{ $json.session_id }} --model sonnet --print --output-format json --dangerously-skip-permissions",
+        "cwd": "E:\\Contexto CLAUDE"
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1600, 0],
+      "id": "ssh-test",
+      "name": "Claude Test",
+      "credentials": {
+        "sshPassword": {
+          "id": "V4sZYDRz7ppSgxbk",
+          "name": "JARVIS"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const stdout = $json.stdout || '';\nlet result = stdout;\n\ntry {\n  const parsed = JSON.parse(stdout);\n  result = parsed.result || stdout;\n} catch (e) {}\n\nconst isOk = result.trim().toUpperCase() === 'OK';\n\nreturn {\n  json: {\n    test_result: result,\n    is_ok: isOk\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1800, 0],
+      "id": "parse-test",
+      "name": "Parse Test"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "ok-check",
+              "leftValue": "={{ $json.is_ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [2000, 0],
+      "id": "if-ok",
+      "name": "Test OK?"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  json: {\n    success: true,\n    workflow_id: $('Set Counter').item.json.workflow_id,\n    message: 'Workflow created and tested successfully!'\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2200, -100],
+      "id": "success",
+      "name": "Success"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const testResult = $json.test_result;\nconst jsonMatch = testResult.match(/```json\\s*\\n([\\s\\S]*?)\\n```/);\n\nif (!jsonMatch) {\n  throw new Error('No fixed workflow JSON in response');\n}\n\nconst fixedWorkflow = JSON.parse(jsonMatch[1]);\n\nreturn {\n  json: {\n    workflow: fixedWorkflow\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2200, 100],
+      "id": "parse-fix",
+      "name": "Parse Fix"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=http://localhost:5678/api/v1/workflows/{{ $('Set Counter').item.json.workflow_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "name",
+              "value": "={{ $json.workflow.name }}"
+            },
+            {
+              "name": "nodes",
+              "value": "={{ $json.workflow.nodes }}"
+            },
+            {
+              "name": "connections",
+              "value": "={{ $json.workflow.connections }}"
+            },
+            {
+              "name": "settings",
+              "value": "={{ $json.workflow.settings }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [2400, 100],
+      "id": "update-wf",
+      "name": "Update Workflow",
+      "notes": "⚠️ Configure credencial 'n8n API' aqui!"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:5678/api/v1/workflows/{{ $('Set Counter').item.json.workflow_id }}/activate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "versionId",
+              "value": "={{ $json.versionId }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [2600, 100],
+      "id": "reactivate",
+      "name": "Reactivate",
+      "notes": "⚠️ Configure credencial 'n8n API' aqui!"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "inc-retry",
+              "name": "retryCount",
+              "value": "={{ $('Set Counter').item.json.retryCount + 1 }}",
+              "type": "number"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2800, 100],
+      "id": "inc-counter",
+      "name": "Increment Counter"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "retry-check",
+              "leftValue": "={{ $json.retryCount }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [3000, 100],
+      "id": "if-retry",
+      "name": "More Retries?"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  json: {\n    success: false,\n    workflow_id: $('Set Counter').item.json.workflow_id,\n    message: 'Failed after 3 attempts. Check workflow manually.'\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3200, 200],
+      "id": "failure",
+      "name": "Failure"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{"node": "Respond", "type": "main", "index": 0}]]
+    },
+    "Respond": {
+      "main": [[{"node": "Generate Session", "type": "main", "index": 0}]]
+    },
+    "Generate Session": {
+      "main": [[{"node": "Claude Create", "type": "main", "index": 0}]]
+    },
+    "Claude Create": {
+      "main": [[{"node": "Parse Workflow", "type": "main", "index": 0}]]
+    },
+    "Parse Workflow": {
+      "main": [[{"node": "Create Workflow", "type": "main", "index": 0}]]
+    },
+    "Create Workflow": {
+      "main": [[{"node": "Activate Workflow", "type": "main", "index": 0}]]
+    },
+    "Activate Workflow": {
+      "main": [[{"node": "Set Counter", "type": "main", "index": 0}]]
+    },
+    "Set Counter": {
+      "main": [[{"node": "Claude Test", "type": "main", "index": 0}]]
+    },
+    "Claude Test": {
+      "main": [[{"node": "Parse Test", "type": "main", "index": 0}]]
+    },
+    "Parse Test": {
+      "main": [[{"node": "Test OK?", "type": "main", "index": 0}]]
+    },
+    "Test OK?": {
+      "main": [
+        [{"node": "Success", "type": "main", "index": 0}],
+        [{"node": "Parse Fix", "type": "main", "index": 0}]
+      ]
+    },
+    "Parse Fix": {
+      "main": [[{"node": "Update Workflow", "type": "main", "index": 0}]]
+    },
+    "Update Workflow": {
+      "main": [[{"node": "Reactivate", "type": "main", "index": 0}]]
+    },
+    "Reactivate": {
+      "main": [[{"node": "Increment Counter", "type": "main", "index": 0}]]
+    },
+    "Increment Counter": {
+      "main": [[{"node": "More Retries?", "type": "main", "index": 0}]]
+    },
+    "More Retries?": {
+      "main": [
+        [{"node": "Claude Test", "type": "main", "index": 0}],
+        [{"node": "Failure", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "settings": {
+    "availableInMCP": true,
+    "executionOrder": "v1"
+  }
+}

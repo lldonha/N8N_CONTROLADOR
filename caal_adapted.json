@@ -1,0 +1,300 @@
+{
+  "name": "CAAL - Workflow Creator (Adapted)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "create-workflow-caal",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0],
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "notes": "POST /webhook/create-workflow-caal\n{\n  \"description\": \"What the workflow should do\",\n  \"requirements\": \"Optional technical requirements\"\n}"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \n  \"status\": \"creating\",\n  \"message\": \"Creating workflow: {{ $json.body.description }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [200, 0],
+      "id": "respond-webhook",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const description = $json.body?.description || $json.description || '';\nconst requirements = $json.body?.requirements || $json.requirements || 'None';\n\nfunction generateUUID() {\n  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {\n    const r = Math.random() * 16 | 0;\n    const v = c === 'x' ? r : (r & 0x3 | 0x8);\n    return v.toString(16);\n  });\n}\n\nconst sessionId = generateUUID();\n\nconst prompt = `Create a new n8n workflow based on this description:\n\nDescription: ${description}\nRequirements: ${requirements}\n\nIMPORTANT INSTRUCTIONS:\n- Do NOT include: createdAt, updatedAt, id, lastExecuted, versionId fields\n- Workflow name must follow convention: service_action_object\n- In settings, set availableInMCP to true\n- Return ONLY valid JSON in a fenced code block\n- After the JSON, in a separate ```announcement fence, write 1-2 sentences for voice announcement\n\nExample format:\n\\`\\`\\`json\n{\n  \"name\": \"weather_get_current\",\n  \"nodes\": [...],\n  \"connections\": {...},\n  \"settings\": {\"availableInMCP\": true}\n}\n\\`\\`\\`\n\n\\`\\`\\`announcement\nI've created a weather lookup tool. Just ask me about the weather anytime.\n\\`\\`\\``;\n\nreturn {\n  json: {\n    session_id: sessionId,\n    prompt: prompt,\n    description: description,\n    requirements: requirements\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [400, 0],
+      "id": "generate-session",
+      "name": "Generate Session & Prompt"
+    },
+    {
+      "parameters": {
+        "command": "=cd \"E:\\\\Contexto CLAUDE\" && echo \"{{ $json.prompt.replace(/\"/g, '`\"').replace(/\\\\/g, '\\\\\\\\') }}\" | claude --model sonnet --print --output-format json --session-id {{ $json.session_id }} --dangerously-skip-permissions",
+        "cwd": "E:\\Contexto CLAUDE"
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [600, 0],
+      "id": "claude-create",
+      "name": "Claude Create Workflow",
+      "credentials": {
+        "sshPassword": {
+          "id": "V4sZYDRz7ppSgxbk",
+          "name": "JARVIS"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const stdout = $json.stdout || '';\nconst sessionId = $('Generate Session & Prompt').item.json.session_id;\n\n// Parse stdout JSON\nlet claudeResponse;\ntry {\n  claudeResponse = JSON.parse(stdout);\n} catch (e) {\n  // Fallback: extract from text\n  claudeResponse = { result: stdout };\n}\n\nconst result = claudeResponse.result || stdout;\n\n// Extract JSON from ```json fence\nconst jsonMatch = result.match(/```json\\s*\\n([\\s\\S]*?)\\n```/);\nif (!jsonMatch) {\n  throw new Error('Could not find JSON code fence in Claude response');\n}\n\n// Extract announcement from ```announcement fence\nconst announcementMatch = result.match(/```announcement\\s*\\n([\\s\\S]*?)\\n```/);\nconst announcement = announcementMatch ? announcementMatch[1].trim() : 'Workflow created';\n\n// Parse the workflow\nconst workflow = JSON.parse(jsonMatch[1]);\n\nreturn {\n  json: {\n    workflow: workflow,\n    announcement: announcement,\n    session_id: sessionId\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [800, 0],
+      "id": "parse-workflow",
+      "name": "Parse Workflow JSON"
+    },
+    {
+      "parameters": {
+        "workflow": "={{ $json.workflow }}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 0],
+      "id": "create-via-mcp",
+      "name": "Create via MCP",
+      "notes": "Uses n8n MCP tool to create workflow"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "retry-counter",
+              "name": "retryCount",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "workflow-data",
+              "name": "workflow_id",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "session-persist",
+              "name": "session_id",
+              "value": "={{ $('Parse Workflow JSON').item.json.session_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1200, 0],
+      "id": "init-retry",
+      "name": "Init Retry Counter"
+    },
+    {
+      "parameters": {
+        "command": "=cd \"E:\\\\Contexto CLAUDE\" && echo \"The workflow is now published (ID: {{ $json.workflow_id }}). Test it and ensure it's working. If working, respond ONLY with the word OK. If not working, fix it and respond with the updated workflow JSON in ```json fence.\" | claude --model sonnet --print --output-format json -r {{ $json.session_id }} --dangerously-skip-permissions",
+        "cwd": "E:\\Contexto CLAUDE"
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1400, 0],
+      "id": "claude-test",
+      "name": "Claude Test Workflow",
+      "credentials": {
+        "sshPassword": {
+          "id": "V4sZYDRz7ppSgxbk",
+          "name": "JARVIS"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const stdout = $json.stdout || '';\nlet result = stdout;\n\ntry {\n  const parsed = JSON.parse(stdout);\n  result = parsed.result || stdout;\n} catch (e) {\n  // Use raw stdout\n}\n\nreturn {\n  json: {\n    test_result: result,\n    is_ok: result.trim().toUpperCase() === 'OK'\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1600, 0],
+      "id": "parse-test",
+      "name": "Parse Test Result"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "test-ok",
+              "leftValue": "={{ $json.is_ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [1800, 0],
+      "id": "if-test-passed",
+      "name": "Test Passed?"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const workflowName = $('Parse Workflow JSON').item.json.workflow.name;\nconst announcement = $('Parse Workflow JSON').item.json.announcement;\n\nreturn {\n  json: {\n    success: true,\n    workflow_name: workflowName,\n    message: announcement\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, -100],
+      "id": "success-handler",
+      "name": "Success Handler"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const testResult = $json.test_result;\n\n// Extract fixed workflow from ```json fence\nconst jsonMatch = testResult.match(/```json\\s*\\n([\\s\\S]*?)\\n```/);\nif (!jsonMatch) {\n  throw new Error('Claude did not return fixed workflow JSON');\n}\n\nconst fixedWorkflow = JSON.parse(jsonMatch[1]);\n\nreturn {\n  json: {\n    workflow: fixedWorkflow\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 100],
+      "id": "parse-fix",
+      "name": "Parse Fixed Workflow"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "increment",
+              "name": "retryCount",
+              "value": "={{ $('Init Retry Counter').item.json.retryCount + 1 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2400, 100],
+      "id": "increment-retry",
+      "name": "Increment Retry"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "retry-check",
+              "leftValue": "={{ $json.retryCount }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [2600, 100],
+      "id": "if-more-retries",
+      "name": "More Retries?"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  json: {\n    success: false,\n    message: 'Failed after 3 retry attempts. Manual intervention required.'\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2800, 200],
+      "id": "failure-handler",
+      "name": "Failure Handler"
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[{"node": "Respond to Webhook", "type": "main", "index": 0}]]
+    },
+    "Respond to Webhook": {
+      "main": [[{"node": "Generate Session & Prompt", "type": "main", "index": 0}]]
+    },
+    "Generate Session & Prompt": {
+      "main": [[{"node": "Claude Create Workflow", "type": "main", "index": 0}]]
+    },
+    "Claude Create Workflow": {
+      "main": [[{"node": "Parse Workflow JSON", "type": "main", "index": 0}]]
+    },
+    "Parse Workflow JSON": {
+      "main": [[{"node": "Create via MCP", "type": "main", "index": 0}]]
+    },
+    "Create via MCP": {
+      "main": [[{"node": "Init Retry Counter", "type": "main", "index": 0}]]
+    },
+    "Init Retry Counter": {
+      "main": [[{"node": "Claude Test Workflow", "type": "main", "index": 0}]]
+    },
+    "Claude Test Workflow": {
+      "main": [[{"node": "Parse Test Result", "type": "main", "index": 0}]]
+    },
+    "Parse Test Result": {
+      "main": [[{"node": "Test Passed?", "type": "main", "index": 0}]]
+    },
+    "Test Passed?": {
+      "main": [
+        [{"node": "Success Handler", "type": "main", "index": 0}],
+        [{"node": "Parse Fixed Workflow", "type": "main", "index": 0}]
+      ]
+    },
+    "Parse Fixed Workflow": {
+      "main": [[{"node": "Increment Retry", "type": "main", "index": 0}]]
+    },
+    "Increment Retry": {
+      "main": [[{"node": "More Retries?", "type": "main", "index": 0}]]
+    },
+    "More Retries?": {
+      "main": [
+        [{"node": "Claude Test Workflow", "type": "main", "index": 0}],
+        [{"node": "Failure Handler", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "settings": {
+    "availableInMCP": true,
+    "executionOrder": "v1"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(findstr:*)",
+      "mcp__MCP_DOCKER__tools_documentation",
+      "mcp__MCP_DOCKER__search_nodes",
+      "mcp__MCP_DOCKER__get_node_essentials",
+      "mcp__MCP_DOCKER__n8n_create_workflow",
+      "mcp__MCP_DOCKER__list_nodes",
+      "mcp__MCP_DOCKER__n8n_get_workflow",
+      "mcp__MCP_DOCKER__n8n_update_partial_workflow",
+      "Bash(curl:*)",
+      "mcp__MCP_DOCKER__n8n_list_executions",
+      "mcp__MCP_DOCKER__n8n_get_execution",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "mcp__MCP_DOCKER__n8n_get_workflow_minimal",
+      "mcp__MCP_DOCKER__n8n_get_workflow_structure",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
