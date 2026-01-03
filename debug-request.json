@@ -1,0 +1,4 @@
+{
+  "description": "workflow debugger that receives workflow_id and issue description, GETs the existing workflow via n8n API, sends complete workflow JSON and issue to Claude Code via SSH for analysis and fix, parses the corrected workflow, UPDATEs it via API, then tests if the fix worked with retry loop (max 2 attempts)",
+  "requirements": "webhook path /debug-workflow-caal-v2, input must have workflow_id (required) and issue (optional with default generic message), GET request to /api/v1/workflows/{id}, Claude SSH with session persistence using -r flag for resume, parse JSON wrapper format from Claude Code output (skip banner text and parse result field), force availableInMCP to true in settings, UPDATE via PUT to /api/v1/workflows/{id}, test loop similar to creator but max 2 retries instead of 3, use same SSH credentials and working directory as creator workflow"
+}

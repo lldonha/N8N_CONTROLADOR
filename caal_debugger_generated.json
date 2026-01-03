@@ -1,0 +1,369 @@
+{
+  "name": "CAAL-v2 Workflow Debugger",
+  "nodes": [
+    {
+      "id": "webhook_trigger",
+      "name": "Webhook Trigger",
+      "notes": "Receives workflow_id (required) and issue (optional)",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "debug-workflow-caal-v2",
+        "responseData": "firstEntryJson",
+        "responseMode": "lastNode"
+      },
+      "position": [250, 300],
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2
+    },
+    {
+      "id": "validate_input",
+      "name": "Validate Input",
+      "notes": "Validates input and sets defaults",
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "workflow_id",
+              "name": "workflow_id",
+              "type": "string",
+              "value": "={{ $json.body.workflow_id }}"
+            },
+            {
+              "id": "issue",
+              "name": "issue",
+              "type": "string",
+              "value": "={{ $json.body.issue || 'General debugging: analyze workflow for issues, validate configuration, and fix any problems found.' }}"
+            }
+          ]
+        },
+        "mode": "manual"
+      },
+      "position": [450, 300],
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3
+    },
+    {
+      "id": "get_workflow",
+      "name": "GET Existing Workflow",
+      "notes": "Fetches current workflow state from n8n API",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "GET",
+        "url": "http://localhost:5678/api/v1/workflows/{{ $json.workflow_id }}",
+        "sendHeaders": false
+      },
+      "position": [650, 300],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "GINp7kOe8wpUicBu",
+          "name": "n8n API Key"
+        }
+      }
+    },
+    {
+      "id": "prepare_claude_prompt",
+      "name": "Prepare Claude Prompt",
+      "notes": "Formats prompt for Claude Code",
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "claude_prompt",
+              "name": "claude_prompt",
+              "type": "string",
+              "value": "={{ 'WORKFLOW DEBUG REQUEST\\n\\nIssue: ' + $('Validate Input').item.json.issue + '\\n\\nCurrent workflow JSON:\\n' + JSON.stringify($json, null, 2) + '\\n\\nPlease analyze this n8n workflow, identify and fix the issue, then return the corrected workflow JSON in ```json fence.\\n\\nIMPORTANT: Ensure settings.availableInMCP is set to true in the corrected workflow.' }}"
+            },
+            {
+              "id": "workflow_original",
+              "name": "workflow_original",
+              "type": "object",
+              "value": "={{ $json }}"
+            }
+          ]
+        },
+        "mode": "manual"
+      },
+      "position": [850, 300],
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3
+    },
+    {
+      "credentials": {
+        "sshPassword": {
+          "id": "V4sZYDRz7ppSgxbk",
+          "name": "JARVIS"
+        }
+      },
+      "id": "claude_ssh_debug",
+      "name": "Claude SSH Debug",
+      "notes": "Sends to Claude Code via SSH with session persistence (-r flag)",
+      "parameters": {
+        "command": "=claude -p \"{{ $json.claude_prompt }}\" -r debug-session-{{ $('Validate Input').item.json.workflow_id }} --model sonnet --print --output-format json --dangerously-skip-permissions",
+        "cwd": "E:\\Contexto CLAUDE"
+      },
+      "position": [1050, 300],
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1
+    },
+    {
+      "id": "parse_claude_output",
+      "name": "Parse Claude Output",
+      "notes": "Extracts and validates corrected workflow JSON",
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const stdout = $json.stdout || '';\nlet result = stdout;\n\ntry {\n  const jsonStart = stdout.indexOf('{\"type\"');\n  if (jsonStart > -1) {\n    const jsonStr = stdout.substring(jsonStart);\n    const parsed = JSON.parse(jsonStr);\n    result = parsed.result || stdout;\n  }\n} catch (e) {}\n\nconst jsonMatch = result.match(/```json\\s*\\n([\\s\\S]*?)\\n```/);\n\nif (!jsonMatch) {\n  throw new Error('Failed to parse Claude output: no JSON wrapper found');\n}\n\nconst correctedWorkflow = JSON.parse(jsonMatch[1]);\n\nif (!correctedWorkflow.settings) {\n  correctedWorkflow.settings = {};\n}\ncorrectedWorkflow.settings.availableInMCP = true;\n\nreturn {\n  json: {\n    workflow: correctedWorkflow,\n    workflow_id: $('Validate Input').item.json.workflow_id\n  }\n};"
+      },
+      "position": [1250, 300],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "id": "update_workflow",
+      "name": "UPDATE Workflow (PUT)",
+      "notes": "Updates workflow via n8n API",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "PUT",
+        "url": "=http://localhost:5678/api/v1/workflows/{{ $json.workflow_id }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "name",
+              "value": "={{ $json.workflow.name }}"
+            },
+            {
+              "name": "nodes",
+              "value": "={{ $json.workflow.nodes }}"
+            },
+            {
+              "name": "connections",
+              "value": "={{ $json.workflow.connections }}"
+            },
+            {
+              "name": "settings",
+              "value": "={{ $json.workflow.settings }}"
+            }
+          ]
+        }
+      },
+      "position": [1450, 300],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "GINp7kOe8wpUicBu",
+          "name": "n8n API Key"
+        }
+      }
+    },
+    {
+      "id": "init_retry_counter",
+      "name": "Init Retry Counter",
+      "notes": "Initializes retry loop (max 2 attempts)",
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "retry_count",
+              "name": "retry_count",
+              "type": "number",
+              "value": 0
+            },
+            {
+              "id": "max_retries",
+              "name": "max_retries",
+              "type": "number",
+              "value": 2
+            },
+            {
+              "id": "workflow_id",
+              "name": "workflow_id",
+              "type": "string",
+              "value": "={{ $json.id }}"
+            }
+          ]
+        },
+        "mode": "manual"
+      },
+      "position": [1650, 300],
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3
+    },
+    {
+      "id": "test_workflow",
+      "name": "Test Workflow",
+      "notes": "Validates workflow update was successful",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "GET",
+        "url": "=http://localhost:5678/api/v1/workflows/{{ $json.workflow_id }}"
+      },
+      "position": [1850, 300],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "GINp7kOe8wpUicBu",
+          "name": "n8n API Key"
+        }
+      }
+    },
+    {
+      "id": "check_test_result",
+      "name": "Check Test Result",
+      "notes": "Checks if workflow update succeeded",
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "test_success",
+              "leftValue": "={{ $json.id }}",
+              "operator": {
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "={{ $('Init Retry Counter').item.json.workflow_id }}"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          }
+        }
+      },
+      "position": [2050, 300],
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3
+    },
+    {
+      "id": "success_response",
+      "name": "Success Response",
+      "notes": "Returns success message to caller",
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  json: {\n    success: true,\n    workflow_id: $('Init Retry Counter').item.json.workflow_id,\n    message: 'Workflow debugged and updated successfully!'\n  }\n};"
+      },
+      "position": [2250, 200],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "id": "increment_retry",
+      "name": "Increment Retry",
+      "notes": "Increments retry counter",
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "retry_count",
+              "name": "retry_count",
+              "type": "number",
+              "value": "={{ $('Init Retry Counter').item.json.retry_count + 1 }}"
+            }
+          ]
+        },
+        "mode": "manual"
+      },
+      "position": [2250, 400],
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3
+    },
+    {
+      "id": "check_retry_limit",
+      "name": "Check Retry Limit",
+      "notes": "Checks if retry limit reached (max 2 retries)",
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "retry_limit",
+              "leftValue": "={{ $json.retry_count }}",
+              "operator": {
+                "operation": "lt",
+                "type": "number"
+              },
+              "rightValue": 2
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          }
+        }
+      },
+      "position": [2450, 400],
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3
+    },
+    {
+      "id": "max_retries_error",
+      "name": "Max Retries Error",
+      "notes": "Returns error when max retries exceeded",
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  json: {\n    success: false,\n    workflow_id: $('Init Retry Counter').item.json.workflow_id,\n    message: 'Workflow debugging failed after maximum retries (2 attempts)'\n  }\n};"
+      },
+      "position": [2650, 500],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[{"node": "Validate Input", "type": "main", "index": 0}]]
+    },
+    "Validate Input": {
+      "main": [[{"node": "GET Existing Workflow", "type": "main", "index": 0}]]
+    },
+    "GET Existing Workflow": {
+      "main": [[{"node": "Prepare Claude Prompt", "type": "main", "index": 0}]]
+    },
+    "Prepare Claude Prompt": {
+      "main": [[{"node": "Claude SSH Debug", "type": "main", "index": 0}]]
+    },
+    "Claude SSH Debug": {
+      "main": [[{"node": "Parse Claude Output", "type": "main", "index": 0}]]
+    },
+    "Parse Claude Output": {
+      "main": [[{"node": "UPDATE Workflow (PUT)", "type": "main", "index": 0}]]
+    },
+    "UPDATE Workflow (PUT)": {
+      "main": [[{"node": "Init Retry Counter", "type": "main", "index": 0}]]
+    },
+    "Init Retry Counter": {
+      "main": [[{"node": "Test Workflow", "type": "main", "index": 0}]]
+    },
+    "Test Workflow": {
+      "main": [[{"node": "Check Test Result", "type": "main", "index": 0}]]
+    },
+    "Check Test Result": {
+      "main": [
+        [{"node": "Success Response", "type": "main", "index": 0}],
+        [{"node": "Increment Retry", "type": "main", "index": 0}]
+      ]
+    },
+    "Increment Retry": {
+      "main": [[{"node": "Check Retry Limit", "type": "main", "index": 0}]]
+    },
+    "Check Retry Limit": {
+      "main": [
+        [{"node": "Test Workflow", "type": "main", "index": 0}],
+        [{"node": "Max Retries Error", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "settings": {
+    "availableInMCP": true,
+    "executionOrder": "v1"
+  }
+}
