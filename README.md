@@ -30,8 +30,9 @@ curl -X POST http://localhost:5678/webhook/create-workflow-caal \
 ---
 
 ### 2. CAAL - Workflow Debugger
-**Arquivo:** `caal_debugger.json`
-**Webhook:** `POST /webhook/debug-workflow-caal`
+**Arquivo Manual:** `caal_debugger.json`
+**Arquivo Gerado (CAAL):** `caal_debugger_generated.json` ⭐ **RECOMENDADO**
+**Webhook:** `POST /webhook/debug-workflow-caal` (manual) ou `/debug-workflow-caal-v2` (gerado)
 
 Debugs workflows existentes automaticamente.
 
@@ -42,9 +43,15 @@ Debugs workflows existentes automaticamente.
 - ✅ Mantém `availableInMCP: true`
 - ✅ Session persistence para contexto
 
+**Versão Híbrida (Recomendada):**
+- Combina arquitetura CAAL-gerada (15 nodes) com configuração manual
+- Documentação completa (notes em todos os nodes)
+- Credenciais e URLs pré-configuradas
+- Ver `COMPARISON.md` para análise detalhada
+
 **Exemplo:**
 ```bash
-curl -X POST http://localhost:5678/webhook/debug-workflow-caal \
+curl -X POST http://localhost:5678/webhook/debug-workflow-caal-v2 \
   -H "Content-Type: application/json" \
   -d '{
     "workflow_id": "MYGVeQNhZ8JkGOyu",
@@ -203,14 +210,34 @@ workflow.settings.availableInMCP = true;
 
 ---
 
+## 📊 Comparação CAAL vs Manual
+
+**Arquivo:** `COMPARISON.md`
+
+Análise detalhada comparando o workflow debugger criado:
+- **Manualmente** (por humano)
+- **Via CAAL** (auto-gerado em 3.5 minutos)
+- **Híbrido** (melhor dos dois mundos)
+
+**Principais descobertas:**
+- CAAL venceu em: arquitetura (15 vs 17 nodes), documentação, manutenibilidade
+- Manual venceu em: usabilidade imediata, configuração pronta
+- Híbrido combina: estrutura CAAL + configuração manual
+- **ROI:** 200% mais rápido (5 min vs 15 min)
+
+Ver detalhes completos em: `COMPARISON.md`
+
+---
+
 ## 🔗 Referências
 
 **CAAL Original:**
 - GitHub: https://github.com/CoreWorxLab/CAAL
 - Docs: `G:\Meu Drive\MEMORIAS E TODO\04-REPO-CAAL-DETALHES.md`
 
-**Sessão de Implementação:**
-- `G:\Meu Drive\MEMORIAS E TODO\SESSAO-2026-01-03-CAAL-WORKFLOW-CREATOR.md`
+**Sessões de Implementação:**
+- Creator: `G:\Meu Drive\MEMORIAS E TODO\SESSAO-2026-01-03-CAAL-WORKFLOW-CREATOR.md`
+- Debugger + Comparison: Esta sessão (2026-01-03)
 
 ---
 
